@@ -76,3 +76,11 @@ Technical Support |  Peer support at  [Groups.io](https://groups.io/g/maxprogram
 This video shows how to build and launch TMXEditor: [https://maxprograms.com/tutorials/TMXEditor_build.mp4](https://maxprograms.com/tutorials/TMXEditor_build.mp4)
 
 Compile once and then simply run `npm start` to start TMXEditor
+
+## Python Backend Server (`tmx_server_logic`)
+
+The `tmx_server_logic/` directory contains a Python-based backend server built with FastAPI. This server is responsible for the core logic of TMX file parsing, manipulation, storage (for active sessions), and conversion to/from other formats like CSV or Excel.
+
+For detailed information about the server's architecture, API endpoints, setup, and potential areas for future development, please refer to its dedicated README: [`tmx_server_logic/README.md`](tmx_server_logic/README.md).
+
+## Related Projects

@@ -189,25 +189,30 @@ class MetadataItem(BaseModel): # Generic for TMXAttribute, TMXProperty, TMXNote 
     class Config:
         extra = "allow"
 
-# --- Request Models for Chunk 6 (Data Conversion) ---
+# --- Request Models for Data Conversion ---
 
-class CSVImportRequest(BaseModel):
+class CSVImportOptions(BaseModel):
     languages: List[str] = Field(..., description="List of language codes for columns, in order of appearance after TUID column (if any).")
     charset: str = Field('utf-8', description="Character set of the CSV file.")
     delimiter: str = Field(',', description="Delimiter used in the CSV file.")
     quotechar: str = Field('"', description="Quote character used in the CSV file.")
     tuid_col_index: Optional[int] = Field(None, description="0-based index of the column containing TUIDs. If None, TUIDs are auto-generated.")
 
-class ExcelImportRequest(BaseModel):
+class ExcelImportOptions(BaseModel):
     languages: List[str] = Field(..., description="List of language codes, mapping to columns after TUID column (if any) or based on header_row_index.")
     sheet_name: Optional[str] = Field(None, description="Name of the Excel sheet to import. If None, the first active sheet is used.")
     header_row_index: Optional[int] = Field(1, description="1-based index of the row containing language headers. If None or invalid, 'languages' list order is critical.")
     data_start_row_index: int = Field(2, description="1-based index from where the actual data rows start.")
     tuid_col_letter: Optional[str] = Field(None, description="Column letter (e.g., 'A', 'B') for TUIDs. If None, TUIDs are auto-generated.")
 
-class CSVExportRequest(BaseModel):
+class ExportPathRequest(BaseModel):
+    file_path: str = Field(..., description="Server-local file path to save the exported file.")
+
+class CSVExportOptions(BaseModel): # Specific options for CSV export, if any beyond path
     charset: str = Field('utf-8', description="Character set for the exported CSV file.")
     delimiter: str = Field(',', description="Delimiter for the exported CSV file.")
+
+# (Ensure these are added before they are used in main.py)
 
 
 class MetadataUpdateRequest(BaseModel):

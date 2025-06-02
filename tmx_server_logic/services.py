@@ -197,6 +197,38 @@ class TMXService:
             print(f"Error fetching file info: {e}")
             return FileInfoResponse(is_active=False, file_path=self._current_file_path, tmx_file_id=self._current_tmx_file_id)
 
+    def open_file_from_models(self, header_model: models.TMXHeader, tu_models_list: List[models.TranslationUnit], original_filepath: str = "converted_data.tmx") -> None:
+        self._init_store(for_new_file=True, new_file_path=original_filepath)
+        
+        if self._current_tmx_file_id is None: 
+             raise RuntimeError("Failed to initialize TMX file session and obtain a file ID for model import.")
+
+        try:
+            processed_tus_for_storage = []
+            for tu_model in tu_models_list:
+                # Ensure pure text is populated for variants if missing
+                for variant_model in tu_model.variants:
+                    if variant_model.segment_text_pure is None and variant_model.segment_xml:
+                         variant_model.segment_text_pure = extract_pure_text_from_segment_xml(variant_model.segment_xml)
+                    elif variant_model.segment_text_pure is None: 
+                         variant_model.segment_text_pure = "" # Ensure it's at least an empty string
+                processed_tus_for_storage.append(tu_model)
+
+            if self.store: 
+                # Use models.TMXHeader and models.TranslationUnit as expected by store methods
+                self.store.save_header(header_model, tmx_file_id=self._current_tmx_file_id)
+                self.store.add_translation_units(processed_tus_for_storage, tmx_file_id=self._current_tmx_file_id)
+                self._is_active = True 
+                self._current_file_path = original_filepath 
+            else: 
+                raise RuntimeError("SQLiteStore not initialized during open_file_from_models.")
+
+        except Exception as e:
+            self.close_file() # Attempt to clean up
+            # Log the exception for debugging
+            # logger.error(f"Error opening TMX data from models (source: {original_filepath}): {e}", exc_info=True)
+            raise RuntimeError(f"Error opening TMX data from models (source: {original_filepath}): {e}") from e
+
     # Destructor to ensure DB connection is closed if service instance is deleted
     def __del__(self):
         self.close_file()
@@ -295,9 +327,10 @@ class TMXService:
         except Exception as e:
             raise RuntimeError(f"Failed to change language code: {str(e)}")
 
-    def set_source_language(self, lang_code: str) -> Dict[str, str]:
+    def set_source_language(self, lang_code: str, current_user_id: Optional[str] = None) -> Dict[str, str]:
         """
         Sets the source language (srclang) in the header of the active TMX file.
+        Updates change_date and change_id.
         """
         tmx_id = self._ensure_active_tmx_file_id()
         store = self._get_active_store()
@@ -313,8 +346,8 @@ class TMXService:
             raise RuntimeError("Active TMX file has no header. Cannot set source language.")
         
         header.srclang = lang_code
-        header.change_date = datetime.now(timezone.utc) # Consistent timezone-aware datetime
-        # header.change_id = current_user_id # If header model supports change_id and it's passed
+        header.change_date = datetime.now(timezone.utc)
+        header.change_id = current_user_id
 
         store.save_header(header, tmx_id)
         return {"status": "success", "message": f"Source language set to '{lang_code}'."}
@@ -383,8 +416,13 @@ class TMXService:
                             )
                             store.save_tuv(new_tuv_for_master, master_tu.id_in_db, current_user_id)
                             # Reload master_tu to reflect the new TUV for subsequent logic within this group
-                            updated_master_tu = store.get_translation_unit_by_db_id(master_tu.id_in_db)
-                            if updated_master_tu: master_tu = updated_master_tu
+                            updated_master_tu_model = store.get_translation_unit_by_db_id(master_tu.id_in_db)
+                            if updated_master_tu_model: 
+                                master_tu = updated_master_tu_model # master_tu is now the Pydantic model
+                                # Explicitly update master_tu's change_date and change_id
+                                master_tu.change_date = datetime.now(timezone.utc)
+                                master_tu.change_id = current_user_id
+                                store.update_translation_unit(master_tu.id_in_db, master_tu)
                             merged_to_master_flag = True
                 
                 # Delete the duplicate TU (it's now fully merged or was redundant)
@@ -628,7 +666,7 @@ class TMXService:
         # Let's use the existing `store.update_tuv_field` which takes `tu_db_id` and `lang_code`.
         # This means the data must be a list of model_dump() for properties/notes/attrs.
 
-        json_data_str = json.dumps(data)
+        # json_data_str = json.dumps(data) # This line is redundant as store.update_tuv_field handles serialization
         success = store.update_tuv_field(tu_db_id, lang_code, field_name, data) # Using existing store method
 
         if success:

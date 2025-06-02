@@ -331,22 +331,22 @@ class SQLiteStore:
         row = self.conn.execute(q, params).fetchone()
         return row[0] if row else 0
 
-    def update_tuv_segment(self, tu_db_id: int, lang: str, new_segment_xml: str, new_segment_text_pure: Optional[str]) -> bool:
+    def update_tuv_segment(self, tu_db_id: int, lang: str, new_segment_xml: str, new_segment_text_pure: Optional[str], change_id: Optional[str] = None) -> bool:
         if not self.conn: raise sqlite3.OperationalError("DB not open.")
         try:
             with self.conn:
-                q = "UPDATE translation_unit_variants SET segment_xml = ?, segment_text_pure = ?, change_date = ? WHERE tu_id = ? AND lang = ?"
-                return self.conn.execute(q, (new_segment_xml, new_segment_text_pure, dt_to_iso(datetime.now(timezone.utc)), tu_db_id, lang)).rowcount > 0
+                q = "UPDATE translation_unit_variants SET segment_xml = ?, segment_text_pure = ?, change_date = ?, change_id = ? WHERE tu_id = ? AND lang = ?"
+                return self.conn.execute(q, (new_segment_xml, new_segment_text_pure, dt_to_iso(datetime.now(timezone.utc)), change_id, tu_db_id, lang)).rowcount > 0
         except sqlite3.Error as e: print(f"Error updating TUV segment ({tu_db_id}, {lang}): {e}"); return False
 
-    def update_tuv_field(self, tu_db_id: int, lang: str, field_name: str, field_value: Any) -> bool:
+    def update_tuv_field(self, tu_db_id: int, lang: str, field_name: str, field_value: Any, change_id: Optional[str] = None) -> bool:
         if not self.conn: raise sqlite3.OperationalError("DB not open.")
         if field_name not in {"properties", "notes", "custom_attributes"}: return False
         try:
             val = json.dumps(field_value); time = dt_to_iso(datetime.now(timezone.utc))
             with self.conn:
-                q = f"UPDATE translation_unit_variants SET {field_name} = ?, change_date = ? WHERE tu_id = ? AND lang = ?"
-                return self.conn.execute(q, (val, time, tu_db_id, lang)).rowcount > 0
+                q = f"UPDATE translation_unit_variants SET {field_name} = ?, change_date = ?, change_id = ? WHERE tu_id = ? AND lang = ?"
+                return self.conn.execute(q, (val, time, change_id, tu_db_id, lang)).rowcount > 0
         except (sqlite3.Error, TypeError, json.JSONDecodeError) as e: print(f"Error updating TUV field ({tu_db_id}, {lang}, {field_name}): {e}"); return False
 
     def get_translation_units_filtered(
