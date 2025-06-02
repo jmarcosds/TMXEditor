@@ -1,6 +1,16 @@
+"""
+Parses and writes TMX (Translation Memory eXchange) files according to TMX 1.4 specification.
+This module provides the TMXParser class for handling the reading and writing of TMX
+documents, converting them to and from Pydantic models defined in `models.py`.
+It also includes utility functions for TMX-specific data conversions like datetime
+formatting and extraction of plain text from XML segments.
+"""
 from lxml import etree
 from typing import List, Tuple, Iterable, Optional, Dict, Any
 from datetime import datetime
+# Consider adding logging for warnings/errors instead of print in a production environment.
+# import logging
+# logger = logging.getLogger(__name__)
 
 from .models import (
     TMXHeader,
@@ -41,28 +51,85 @@ def _parse_datetime_tmx(value: Optional[str]) -> Optional[datetime]:
             # Attempt to parse just the date part if time is not included
             return datetime.strptime(value, '%Y%m%d')
         except ValueError:
-            # Log or handle other formats if necessary
-            print(f"Warning: Could not parse datetime string: {value}")
+            # print(f"Warning: Could not parse datetime string: {value}") # Replaced by raising error or logging
+            # For robustness, this could raise a custom parsing error or log.
+            # Returning None implies the date string was invalid or ignorable.
             return None
 
 def _datetime_to_tmx_str(dt_obj: Optional[datetime]) -> Optional[str]:
+    """Converts a datetime object to a TMX-compliant datetime string (YYYYMMDDThhmmssZ)."""
     if not dt_obj:
         return None
     return dt_obj.strftime('%Y%m%dT%H%M%SZ')
 
+def extract_pure_text_from_segment_xml(segment_xml: str) -> str:
+    """
+    Extracts and returns the concatenated text content from an XML segment string.
+    e.g., "<seg>This is <b>bold</b> text.</seg>" -> "This is bold text."
+    """
+    if not segment_xml or not segment_xml.strip():
+        return ""
+    try:
+        # Wrap with a root element if segment_xml is just the content of <seg>
+        # If segment_xml is a full <seg>...</seg> string, etree.fromstring should handle it.
+        # Make sure to handle cases where segment_xml might be just text, not a full <seg> element.
+        # The string might not be a valid XML doc on its own if it's just inner content.
+        # A common pattern is to wrap it if it doesn't start with '<'.
+        # However, TMX <seg> content is defined as "text and/or code elements".
+        # If it's already a <seg>...</seg> string, fromstring will parse it.
+        # If it's inner content like "text <b>bold</b>", fromstring might fail.
+        # The expectation from TUV model is that segment_xml is the *full* <seg>...</seg> element string.
+
+        parser = etree.XMLParser(recover=True) 
+        # Assuming segment_xml is a string like "<seg>content</seg>"
+        # If segment_xml is just "content", fromstring will fail.
+        # The function in services.py seemed to assume segment_xml is the full tag.
+        xml_element = etree.fromstring(segment_xml, parser=parser)
+        
+        text_content = "".join(xml_element.itertext())
+        return text_content.strip()
+    except etree.XMLSyntaxError:
+        # If parsing fails, it might be plain text without tags or malformed.
+        # Fallback: try to return the string as is, assuming it might be plain text.
+        # This matches the previous behavior of printing a warning and returning ""
+        # but returning the original text might be more useful if it was just plain text.
+        # For consistency with the original function's fallback (empty string), let's keep it.
+        # However, a better fallback for "plain text" might be to return segment_xml.strip() directly.
+        # Let's refine this: if it's simple text, it might not be an error.
+        # The original function printed a warning and returned "".
+        # A robust solution might involve checking if the string looks like XML first.
+        # For now, let's keep the simple try-except-return-empty, as per original function's behavior.
+        return "" # Fallback for malformed XML or non-XML text.
+    except Exception: 
+        # Catch any other unexpected errors during parsing.
+        return ""
+
+
 class TMXParser:
     """
-    Parses and writes TMX 1.4 files.
+    Handles parsing of TMX 1.4 files into Pydantic models and writing these models back to TMX files.
+    It uses `lxml` for efficient XML processing.
     """
 
-    def _parse_common_elements(self, element: etree._Element) -> Tuple[List[TMXProperty], List[TMXNote], List[TMXAttribute], Dict[str, Any]]:
-        """Helper to parse properties, notes, and custom attributes from an element (header, tu, tuv)."""
+    def _parse_common_elements(self, element: etree._Element) -> Tuple[List[TMXProperty], List[TMXNote], Dict[str, Any]]:
+        """
+        Helper to parse <prop> and <note> child elements, and extract all raw attributes from a given TMX element.
+        
+        Args:
+            element: The lxml element (header, tu, or tuv) to parse.
+
+        Returns:
+            A tuple containing:
+                - A list of TMXProperty models.
+                - A list of TMXNote models.
+                - A dictionary of the element's raw attributes.
+        """
         properties = []
         notes = []
-        custom_attributes_list = []
+        # custom_attributes_list is handled by _populate_model_attrs from raw_attrs
         
         raw_attrs = dict(element.attrib)
-        model_attrs = {}
+        # model_attrs is not built here, but rather in _populate_model_attrs
 
         for child in element:
             if child.tag == "prop":
@@ -78,10 +145,22 @@ class TMXParser:
                     note_data["o_encoding"] = child.get("o-encoding")
                 notes.append(TMXNote(**note_data))
         
-        return properties, notes, custom_attributes_list, raw_attrs
+        return properties, notes, raw_attrs
     
     def _populate_model_attrs(self, raw_attrs: Dict[str, Any], known_attrs_set: set) -> Tuple[Dict[str, Any], List[TMXAttribute]]:
-        """Separates known attributes for model fields from custom ones."""
+        """
+        Separates known attributes (for direct model field population) from custom attributes.
+        Handles type conversions for specific known attributes like datetimes and integers.
+
+        Args:
+            raw_attrs: Dictionary of raw attributes from an XML element.
+            known_attrs_set: A set of attribute names that are known fields in the target Pydantic model.
+
+        Returns:
+            A tuple containing:
+                - A dictionary of attributes to be used for Pydantic model construction (known fields).
+                - A list of TMXAttribute models for custom attributes.
+        """
         model_constructor_attrs = {}
         custom_attributes_list = []
 
@@ -108,7 +187,21 @@ class TMXParser:
         """
         Parses a TMX file and returns TMXHeader and a list of TranslationUnit models.
         Uses iterparse for memory efficiency with large files.
+
+        Args:
+            filepath: Path to the TMX file.
+
+        Returns:
+            A tuple containing the parsed TMXHeader model and a list of TranslationUnit models.
+
+        Raises:
+            ValueError: If the TMX file is not valid (e.g., missing <header> or <tmx> root).
+                        Also raised by lxml's etree.XMLSyntaxError for invalid XML.
+            RuntimeError: For other unexpected errors during parsing. 
+                          (Note: Service layer maps these to TMXParsingError or TMXServerError)
         """
+        # Note: `print` statements within this method are for basic diagnostics during development.
+        # In a production environment, these should be replaced with a proper logging mechanism.
         try:
             context = etree.iterparse(filepath, events=("start", "end"), recover=True)
             context = iter(context) # make it an iterator
@@ -271,7 +364,16 @@ class TMXParser:
     def write_tmx_file(self, filepath: str, header: TMXHeader, translation_units: Iterable[TranslationUnit], indentation: int = 2):
         """
         Writes TMXHeader and TranslationUnit models to a TMX file.
+
+        Args:
+            filepath: Path where the TMX file will be saved.
+            header: The TMXHeader model.
+            translation_units: An iterable of TranslationUnit models.
+            indentation: Number of spaces for pretty printing the XML.
         """
+        # Note: `print` statements within this method are for basic diagnostics during development.
+        # In a production environment, these should be replaced with a proper logging mechanism.
+
         # Namespace map for xml:lang
         NSMAP = {
             'xml': 'http://www.w3.org/XML/1998/namespace'

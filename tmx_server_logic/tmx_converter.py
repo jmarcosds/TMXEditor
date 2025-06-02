@@ -35,6 +35,24 @@ class TMXConverter:
     ) -> Tuple[TMXHeader, List[TranslationUnit]]:
         """
         Converts data from a CSV file into TMX Pydantic models (Header and TranslationUnits).
+
+        Args:
+            csv_filepath: Path to the input CSV file.
+            languages: List of language codes corresponding to CSV columns,
+                       ordered as they appear after the optional TUID column.
+            charset: Character set of the CSV file.
+            delimiter: Delimiter used in the CSV file.
+            quotechar: Quote character used in the CSV file.
+            tuid_col_index: Optional 0-based index of the column containing TUIDs.
+                            If None, TUIDs are auto-generated.
+
+        Returns:
+            A tuple containing the generated TMXHeader and a list of TranslationUnit models.
+        
+        Raises:
+            FileNotFoundError: If the csv_filepath does not exist.
+            ValueError: If the languages list is empty.
+            RuntimeError: For errors during CSV processing.
         """
         if not os.path.exists(csv_filepath):
             raise FileNotFoundError(f"CSV file not found: {csv_filepath}")
@@ -126,7 +144,26 @@ class TMXConverter:
         tuid_col_letter: Optional[str] = None # e.g., 'A' for TUID column
     ) -> Tuple[TMXHeader, List[TranslationUnit]]:
         """
-        Converts data from an Excel file into TMX Pydantic models.
+        Converts data from an Excel file into TMX Pydantic models (Header and TranslationUnits).
+
+        Args:
+            excel_filepath: Path to the input Excel file.
+            languages: List of language codes. Their order is used to map to columns
+                       after the optional TUID column, or as per header_row_index.
+            sheet_name: Optional name of the Excel sheet to import. If None, the first active sheet is used.
+            header_row_index: Optional 1-based index of the row containing language headers.
+                              If provided, used to map languages to columns. Otherwise, `languages` list order is critical.
+            data_start_row_index: 1-based index from where the actual data rows start.
+            tuid_col_letter: Optional column letter (e.g., 'A', 'B') for TUIDs.
+                             If None, TUIDs are auto-generated.
+        
+        Returns:
+            A tuple containing the generated TMXHeader and a list of TranslationUnit models.
+
+        Raises:
+            FileNotFoundError: If the excel_filepath does not exist.
+            ValueError: If the languages list is empty or sheet is not found.
+            RuntimeError: For errors during Excel processing.
         """
         if not os.path.exists(excel_filepath):
             raise FileNotFoundError(f"Excel file not found: {excel_filepath}")
@@ -195,7 +232,20 @@ class TMXConverter:
         self, store: SQLiteStore, tmx_file_id: int, csv_filepath: str, 
         charset: str = 'utf-8', delimiter: str = ','
     ) -> None:
-        """Exports TMX data (from store) to a CSV file."""
+        """
+        Exports TMX data from the SQLiteStore to a CSV file.
+
+        Args:
+            store: The SQLiteStore instance containing the TMX data.
+            tmx_file_id: The ID of the TMX file session in the store.
+            csv_filepath: Path to save the output CSV file.
+            charset: Character set for the output CSV file.
+            delimiter: Delimiter to use in the CSV file.
+        
+        Raises:
+            ValueError: If the header for the TMX file is not found in the store.
+            RuntimeError: For errors during CSV file writing.
+        """
         header_model = store.get_header(tmx_file_id)
         if not header_model: raise ValueError("Header not found for TMX file.")
         
@@ -228,7 +278,18 @@ class TMXConverter:
     def tmx_content_to_excel(
         self, store: SQLiteStore, tmx_file_id: int, excel_filepath: str
     ) -> None:
-        """Exports TMX data (from store) to an Excel file."""
+        """
+        Exports TMX data from the SQLiteStore to an Excel (XLSX) file.
+
+        Args:
+            store: The SQLiteStore instance containing the TMX data.
+            tmx_file_id: The ID of the TMX file session in the store.
+            excel_filepath: Path to save the output Excel file.
+
+        Raises:
+            ValueError: If the header for the TMX file is not found in the store.
+            RuntimeError: For errors during Excel file writing or if the active sheet cannot be accessed.
+        """
         header_model = store.get_header(tmx_file_id)
         if not header_model: raise ValueError("Header not found for TMX file.")
 
